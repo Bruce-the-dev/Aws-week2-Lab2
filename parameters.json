@@ -1,9 +1,10 @@
 [{
-  "templateFilePath": "vpc-lab.yaml",
+  "template-file-path": "vpc-lab.yaml",
   "parameters": {
     "StudentName": "Bruce-Mutsinzi",
     "InstanceType": "t3.micro"
   },
+  "tags": {},
   "capabilities": ["CAPABILITY_NAMED_IAM"]
 }
 ]
