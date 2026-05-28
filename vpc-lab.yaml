@@ -1,0 +1,315 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Securely Deploying Resources in a VPC Using CloudFormation.
+  Multi-AZ VPC with public web tier and private app tier.
+  All EC2 access is via AWS Systems Manager Session Manager (no SSH).
+
+# ============================================================
+# PARAMETERS
+# ============================================================
+Parameters:
+  StudentName:
+    Type: String
+    Default: "Your Full Name"
+    Description: Name displayed on Apache web page (for grading)
+
+  LatestAmiId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
+    Description: Amazon Linux 2023 AMI (pulled dynamically from AWS SSM)
+
+  InstanceType:
+    Type: String
+    Default: t3.micro
+    AllowedValues: [t2.micro, t3.micro, t3.small]
+    Description: EC2 instance size
+
+# ============================================================
+# NETWORKING (VPC CORE)
+# ============================================================
+Resources:
+
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16   # Private IP range for entire network
+      EnableDnsSupport: true   # Allows DNS resolution inside VPC
+      EnableDnsHostnames: true # Enables public DNS names for instances
+      Tags:
+        - Key: Name
+          Value: lab2-vpc
+
+  # ----------------------------------------------------------
+  # Internet Gateway (IGW)
+  # Gives public subnets access to the internet
+  # ----------------------------------------------------------
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+
+  IGWAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+
+  # ============================================================
+  # SUBNETS (Multi-AZ design for High Availability)
+  # ============================================================
+
+  # Public subnets → used for web servers (internet reachable)
+  PublicSubnetAZ1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.1.0/24
+      AvailabilityZone: !Select [0, !GetAZs '']
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: lab2-public-az1
+
+  PublicSubnetAZ2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.2.0/24
+      AvailabilityZone: !Select [1, !GetAZs '']
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: lab2-public-az2
+
+  # Private subnets → used for backend application servers (no direct internet)
+  PrivateSubnetAZ1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.3.0/24
+      AvailabilityZone: !Select [0, !GetAZs '']
+      Tags:
+        - Key: Name
+          Value: lab2-private-az1
+
+  PrivateSubnetAZ2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.4.0/24
+      AvailabilityZone: !Select [1, !GetAZs '']
+      Tags:
+        - Key: Name
+          Value: lab2-private-az2
+
+  # ============================================================
+  # NAT GATEWAYS (Outbound internet for private instances only)
+  # ============================================================
+
+  # Elastic IP = static public IP for NAT Gateway
+  EIPAZ1:
+    Type: AWS::EC2::EIP
+    DependsOn: IGWAttachment
+    Properties:
+      Domain: vpc
+
+  EIPAZ2:
+    Type: AWS::EC2::EIP
+    DependsOn: IGWAttachment
+    Properties:
+      Domain: vpc
+
+  # NAT Gateway = allows PRIVATE instances to access internet (updates, downloads)
+  NATGatewayAZ1:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt EIPAZ1.AllocationId
+      SubnetId: !Ref PublicSubnetAZ1
+
+  NATGatewayAZ2:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt EIPAZ2.AllocationId
+      SubnetId: !Ref PublicSubnetAZ2
+
+  # ============================================================
+  # ROUTE TABLES
+  # ============================================================
+
+  # Public route table → internet access via IGW
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: IGWAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  # Private route tables → outbound internet via NAT (per AZ)
+  PrivateRouteTableAZ1:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+
+  PrivateRouteAZ1:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTableAZ1
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NATGatewayAZ1
+
+  PrivateRouteTableAZ2:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+
+  PrivateRouteAZ2:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTableAZ2
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NATGatewayAZ2
+
+  # ============================================================
+  # SECURITY GROUPS (Firewall rules)
+  # ============================================================
+
+  # Public web tier security group
+  PublicSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Web tier (HTTP + ICMP only)
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0   # Allow web traffic from internet
+        - IpProtocol: icmp
+          FromPort: -1
+          ToPort: -1
+          CidrIp: 10.0.0.0/16 # Ping only within VPC (secure)
+      Tags:
+        - Key: Name
+          Value: lab2-public-sg
+
+  # Private tier security group
+  PrivateSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Private tier (no internet access)
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: icmp
+          FromPort: -1
+          ToPort: -1
+          CidrIp: 10.0.0.0/16  # Only internal VPC communication
+
+  # ============================================================
+  # IAM ROLE FOR SSM (Session Manager access)
+  # ============================================================
+
+  SSMRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+        # This policy allows EC2 to register with AWS Systems Manager
+        # so you can connect WITHOUT SSH keys or public IPs
+
+  SSMInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - !Ref SSMRole
+
+  # ============================================================
+  # PUBLIC EC2 INSTANCES (Web Tier)
+  # ============================================================
+
+  WebA:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref LatestAmiId
+      InstanceType: !Ref InstanceType
+      SubnetId: !Ref PublicSubnetAZ1
+      IamInstanceProfile: !Ref SSMInstanceProfile
+      SecurityGroupIds:
+        - !Ref PublicSG
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          dnf install -y httpd   # AL2023 package manager
+          systemctl enable httpd
+          systemctl start httpd
+          echo "<h1>${StudentName}</h1><p>Lab 2 Web Server A</p>" > /var/www/html/index.html
+
+  WebB:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref LatestAmiId
+      InstanceType: !Ref InstanceType
+      SubnetId: !Ref PublicSubnetAZ2
+      IamInstanceProfile: !Ref SSMInstanceProfile
+      SecurityGroupIds:
+        - !Ref PublicSG
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          dnf install -y httpd
+          systemctl enable httpd
+          systemctl start httpd
+          echo "<h1>${StudentName}</h1><p>Lab 2 Web Server B</p>" > /var/www/html/index.html
+
+  # ============================================================
+  # PRIVATE EC2 INSTANCES (App Tier)
+  # ============================================================
+
+  AppA:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref LatestAmiId
+      InstanceType: !Ref InstanceType
+      SubnetId: !Ref PrivateSubnetAZ1
+      IamInstanceProfile: !Ref SSMInstanceProfile
+      SecurityGroupIds:
+        - !Ref PrivateSG
+
+  AppB:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref LatestAmiId
+      InstanceType: !Ref InstanceType
+      SubnetId: !Ref PrivateSubnetAZ2
+      IamInstanceProfile: !Ref SSMInstanceProfile
+      SecurityGroupIds:
+        - !Ref PrivateSG
+
+# ============================================================
+# OUTPUTS (used for demo screenshots)
+# ============================================================
+Outputs:
+
+  WebAURL:
+    Description: Public web server A URL
+    Value: !Sub "http://${WebA.PublicIp}"
+
+  WebBURL:
+    Description: Public web server B URL
+    Value: !Sub "http://${WebB.PublicIp}"
+
+  AppAPrivateIP:
+    Value: !GetAtt AppA.PrivateIp
+
+  AppBPrivateIP:
+    Value: !GetAtt AppB.PrivateIp
