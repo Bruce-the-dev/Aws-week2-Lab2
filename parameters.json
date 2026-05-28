@@ -1,0 +1,10 @@
+[
+  {
+    "ParameterKey": "StudentName",
+    "ParameterValue": "Bruce-Mutsinzi"
+  },
+  {
+    "ParameterKey": "InstanceType",
+    "ParameterValue": "t3.micro"
+  }
+]

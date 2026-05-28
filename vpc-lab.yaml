@@ -10,7 +10,7 @@ Description: >
 Parameters:
   StudentName:
     Type: String
-    Default: "Your Full Name"
+    Default: "Bruce-Mutsinzi"
     Description: Name displayed on Apache web page (for grading)
 
   LatestAmiId:
@@ -281,7 +281,7 @@ Resources:
           dnf install -y httpd   # AL2023 package manager
           systemctl enable httpd
           systemctl start httpd
-          echo "<h1>${StudentName}</h1><p>Lab 2 Web Server A</p>" > /var/www/html/index.html
+          echo "<h1>${Bruce-Mutsinzi}</h1><p>Lab 2 Web Server A</p>" > /var/www/html/index.html
 
   WebB:
     Type: AWS::EC2::Instance
@@ -298,7 +298,7 @@ Resources:
           dnf install -y httpd
           systemctl enable httpd
           systemctl start httpd
-          echo "<h1>${StudentName}</h1><p>Lab 2 Web Server B</p>" > /var/www/html/index.html
+          echo "<h1>${Bruce-Mutsinzi}</h1><p>Lab 2 Web Server B</p>" > /var/www/html/index.html
 
   # ============================================================
   # PRIVATE EC2 INSTANCES (App Tier)
