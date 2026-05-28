@@ -1,4 +1,4 @@
-{
+[{
   "templateFilePath": "vpc-lab.yaml",
   "parameters": {
     "StudentName": "Bruce-Mutsinzi",
@@ -6,3 +6,4 @@
   },
   "capabilities": ["CAPABILITY_NAMED_IAM"]
 }
+]
