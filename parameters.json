@@ -1,10 +1,8 @@
-[
-  {
-    "ParameterKey": "StudentName",
-    "ParameterValue": "Bruce-Mutsinzi"
+{
+  "templateFilePath": "vpc-lab.yaml",
+  "parameters": {
+    "StudentName": "Bruce-Mutsinzi",
+    "InstanceType": "t3.micro"
   },
-  {
-    "ParameterKey": "InstanceType",
-    "ParameterValue": "t3.micro"
-  }
-]
+  "capabilities": ["CAPABILITY_NAMED_IAM"]
+}
